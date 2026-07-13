@@ -1,0 +1,3 @@
+It's just simple hello window with triangle using gtk4, python and opengl using moderngl.
+You can rotate the triangle from right side in window.
+
