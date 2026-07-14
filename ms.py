@@ -223,342 +223,9 @@ def shader_program_station():
     return vertex_shader, fragment_shader
 
 
-#
-
-class ModernGLWidget(Gtk.GLArea):
-
-    def __init__(self):
-        super().__init__()
-        self.program = None
-        self.ctx = None
-        self.vbo = None
-        self.ibo = None
-        self.vao = None
-        # Set widget layout properties to fill the container space
-        self.set_hexpand(True)
-        self.set_vexpand(True)
-
-        # Request depth buffer and configure ES 3.0 target
-        self.set_has_depth_buffer(True)
-        self.set_required_version(3, 0) # Targets OpenGL ES 3.0 (300 es)
-
-        
-
-        # Signal Bindings
-        self.connect('realize', self.on_realize)
-        self.connect('render', self.on_render)
-        #self.connect('resize', self.on_resize)
-        #self.connect("unrealize", self.on_unrealize)
-    
-
-   
-
-    
-    def on_realize(self, widget):
-        self.make_current()
-        if self.get_error() is not None:
-            print("GLArea initialization error:", self.get_error())
-            return
-
-        # Initialize ModernGL context inside active GTK Context
-        self.ctx = moderngl.get_context()
-        self.ctx.enable(self.ctx.DEPTH_TEST)
-
-        
-        self.program = self.ctx.program(
-            vertex_shader=VERTEX_SHADER,
-            fragment_shader=FRAGMENT_SHADER
-        )
-        #
-        # Load obj buffers
-        # Initial fallback display
-        initial_v = np.array([
-            [-0.5, -0.5, 0.0,  0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0],
-            [ 0.5, -0.5, 0.0,  0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0],
-            [ 0.0,  0.5, 0.0,  0.0, 0.0, 1.0,  0.0, 0.0, 1.0, 1.0]
-        ], dtype='f4').tobytes()
-        initial_i = np.array([0, 1, 2], dtype='i4').tobytes()
-
-        self.set_new_model_data(initial_v, initial_i)
-
-    def on_render(self, area, context):
-        if not self.ctx or not self.vao:
-            return True
-        self.ctx.clear(0.12, 0.12, 0.14, 1.0, depth=1.0)
-        self.vao.render(moderngl.TRIANGLES)
-        return True
-
-    def on_unrealize(self, area):
-        self.make_current()
-        if self.vao: self.vao.release()
-        if self.vbo: self.vbo.release()
-        if self.ibo: self.ibo.release()
-        if self.program: self.program.release()
-        if self.ctx: self.ctx.release()
-
-    
-
-    def set_new_model_data(self, v_bytes, i_bytes):
-        print("set_new_model_data", v_bytes, i_bytes)
-        # Load obj buffers
-        self.make_current()
-        
-        #if self.vao: self.vao.release()
-        #if self.vbo: self.vbo.release()
-        #if self.ibo: self.ibo.release()
-
-        try:
-
-            self.vbo = self.ctx.buffer(v_bytes)
-            self.ibo = self.ctx.buffer(i_bytes)
-
-            #self.vbo.write(v_bytes)
-            #self.ibo.write(i_bytes)
-
-            self.vao = self.ctx.vertex_array(
-                self.program,
-                [(self.vbo, '3f 3f 4f', 'in_position', 'in_normal', 'in_color')],
-                index_buffer=self.ibo
-            )
-            print(f"success write vao")
-        except Exception as e:
-            print(f"Error: {e}")
-
-
-
-        """self.vao = self.ctx.vertex_array(
-                self.program,
-                [(self.vbo, '3f 3f', 'in_position', 'in_normal')],
-                index_buffer=self.ibo
-            )"""
-
-
-
-#
-
-
-class MeshViewerApp(Gtk.ApplicationWindow):
-    def __init__(self):
-        super().__init__(application_id='com.example.ModernGLGTK4')
-        self.state = "triangle"
-        self.gl_tri = None
-        self.gl_bus = None
-        self.gl_station = None
-
-        self.triangle_file = "tri_3d.obj"
-
-
-        self.raw_triangle = self._load_or_generate_triangle()
-        #self.raw_bus = self._load_or_generate_bus()
-        self.gl_widget = None
-
-
-    def _load_or_generate_triangle(self):
-        if os.path.exists(self.triangle_file):
-            return trimesh.load(self.triangle_file, force='mesh')
-        # Default procedural triangle fallback
-        mesh = trimesh.Trimesh(
-            vertices=[[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]],
-            faces=[[0, 1, 2]]
-        )
-        mesh.visual.vertex_colors = [220, 50, 50, 255] # Red
-        return mesh
-    
-    def get_mesh_bytes(self, mesh):
-        # trimesh automatically handles normal generation
-        if not hasattr(mesh, 'vertex_normals'):
-            mesh.generate_normals()
-
-        vertices = mesh.vertices.astype('f4')
-        normals = mesh.vertex_normals.astype('f4')
-        
-        vertex_data = np.hstack([vertices, normals])
-        indices = mesh.faces.astype('i4')
-
-        return vertex_data.tobytes(), indices.tobytes() 
-
-
-    def on_model_select(self, state):
-            print(f"clicked: {state}")
-            #b_lbl.set_label(f"clicked: {state}")
-            self.state = state
-            if state == "triangle":
-                #self.gl_tri.set_visible(True)
-                #self.gl_bus.set_visible(False)
-                #self.gl_station.set_visible(False)
-                #
-                if self.raw_triangle:
-                    print("raw tri")
-                mesh = self.raw_triangle.copy()
-                print(f"tri mesh len: {mesh}")
-                mesh.vertices -= mesh.center_mass
-                max_bound = np.max(np.abs(mesh.vertices))
-                """if max_bound > 0:
-                    mesh.vertices /= max_bound
-                    mesh.vertices *= 1.0"""
-                v_bytes, i_bytes = self.get_mesh_bytes(mesh)
-
-                
-                
-                #self.gl_widget.set_new_model_data(v_bytes, i_bytes)
-
-                
-
-            elif state == "bus":
-                pass
-                #self.gl_bus.set_visible(True)
-                #self.gl_tri.set_visible(False)
-                #self.gl_station.set_visible(False)
-                
-                
-            elif state == "station":
-                pass
-                #self.gl_station.set_visible(True)
-                #self.gl_tri.set_visible(False)
-                #self.gl_bus.set_visible(False)
-                
-            else:
-                pass
-                #self.gl_tri.set_visible(True)
-                #self.gl_bus.set_visible(False)
-                #self.gl_station.set_visible(False)
-
-            #
-            
-            self.gl_widget.set_new_model_data(v_bytes, i_bytes)
-            self.gl_widget.queue_draw()
-                
-
-    def do_activate(self):
-        self.raw_triangle = self._load_or_generate_triangle()
-        #
-        win = Gtk.ApplicationWindow(application=self)
-        win.set_title("GTK4 + ModernGL 3D Bus Loader")
-        win.set_default_size(950, 650)
-        self.gl_widget = ModernGLWidget()
-        self.gl_widget.set_visible(True)
-        
-
-        # 1. Instance canvas pointing to your bus file
-        #self.gl_tri = ModernGLWidgetTriangle('tri_3d.obj') 
-        #gl_tri.set_visible(False)
-
-        #self.gl_bus = ModernGLWidgetBus('bus.obj')
-        #self.gl_bus.set_visible(False)
-
-        #self.gl_station = ModernGLWidgetStation('stationBus.obj')
-        #self.gl_station.set_visible(False)
-
-
-
-        #
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_size_request(800, -1)
-        b_lbl = Gtk.Label(label="test...")
-        box.append(b_lbl)
-
-        # 2. Layout construction
-        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        main_box.set_margin_top(12)
-        main_box.set_margin_bottom(12)
-        main_box.set_margin_start(12)
-        main_box.set_margin_end(12)
-        #
-        main_box.append(self.gl_widget)
-        
-
-        # 3. Sidebar Panel
-        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        sidebar.set_size_request(220, -1)
-        sidebar.set_halign(Gtk.Align.END)
-
-
-
-        #
-        tri_btn = Gtk.Button(label="Triangle")
-        sidebar.append(tri_btn)
-        tri_btn.connect("clicked", lambda button : self.on_model_select("triangle"))
-
-        bus_btn = Gtk.Button(label="Bus") 
-        sidebar.append(bus_btn)
-        #bus_btn.connect("clicked", lambda button : self.on_model_select("bus", button))
-
-        station_btn = Gtk.Button(label="Station") 
-        sidebar.append(station_btn)
-        #station_btn.connect("clicked", lambda button : self.on_model_select("station", button))
-        #
-        slider_label = Gtk.Label(label="Rotation Speed:")
-        slider_label.set_halign(Gtk.Align.START)
-        slider_footer = Gtk.Label(label=f"Rotation: 0")
-        slider_footer.set_halign(Gtk.Align.START)
-        slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 10.0, 0.2)
-        #slider.set_value(gl_widget.speed)
-        #slider.connect("value-changed", on_slider_changed, gl_widget)
-
-        
-
-
-        sidebar.append(slider_label)
-        sidebar.append(slider)
-        sidebar.append(slider_footer)
-
-        #gl_widget.pos_y = 5.5
-
-        # --- SLIDER 2: Height (Y Position) ---
-        height_slider_label = Gtk.Label(label="Height (Y Position):")
-        height_slider_label.set_halign(Gtk.Align.START)
-        height_slider_footer = Gtk.Label(label=f"Height: 0")
-        height_slider_footer.set_halign(Gtk.Align.START)
-        # Allows shifting the bus up or down by up to 2.0 units
-        height_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -2.0, 2.0, 0.1)
-        #height_slider.set_value(gl_widget.pos_y)
-        
-        # Connect the height slider to update the canvas' pos_y directly
-        #height_slider.connect("value-changed", lambda s: setattr(gl_widget, 'pos_y', s.get_value()))
-        
-
-        #height_slider.connect("value-changed", cb_height)
-        sidebar.append(height_slider_label)
-        sidebar.append(height_slider)
-        sidebar.append(height_slider_footer)
-
-
-         # --- SLIDER 3: Zoom (Camera Distance) ---
-        zoom_label = Gtk.Label(label="Zoom (Distance):")
-        zoom_label.set_halign(Gtk.Align.START)
-
-        zoom_footer_label = Gtk.Label()
-
-        # 1.5 is very close up, 10.0 is far away
-        zoom_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 10.0, 0.1)
-        #zoom_slider.set_value(gl_widget.zoom)
-       
-
-        #zoom_slider.connect("value-changed", cb_zoom)
-        
-        #zoom_footer_label = Gtk.Label(label=f"zoom: {gl_widget.zoom:.1f}")
-        zoom_footer_label.set_halign(Gtk.Align.START)
-        sidebar.append(zoom_label)
-        sidebar.append(zoom_slider)
-        sidebar.append(zoom_footer_label)
-
-        #
-        main_box.append(sidebar)
-
-        #
-        win.set_child(main_box)
-        win.present()
-        
-        # Start GLib frame ticks
-        GLib.timeout_add(16, on_tick, self.gl_widget)
-        #GLib.timeout_add(16, on_tick, self.gl_tri)
-        #GLib.timeout_add(16, on_tick, self.gl_bus)
-        #GLib.timeout_add(16, on_tick, self.gl_station)
-
-
 def on_tick(canvas):
     # Diese Schleife signalisiert GTK im Hintergrund, den Canvas permanent neu zu zeichnen
-    #canvas.rotation += (canvas.speed / 100.0)
+    canvas.rotation += (canvas.speed / 100.0)
     canvas.queue_render()
     return True # True hält den Timer am Leben
 
@@ -656,8 +323,6 @@ class GLWidget(Gtk.GLArea):
         super().__init__()
 
         self.area = None
-       
-        
         # Initialize attributes
         self.ctx = None
         self.program = None
@@ -666,9 +331,10 @@ class GLWidget(Gtk.GLArea):
         self.ibo = None
         self.texture = None
 
-
         self.rotation = 0.0
         self.speed = 2.0  # Configurable rotational speed constant
+        self.pos_y = 0.0  
+        self.zoom = 4.5  
 
         # Set widget layout properties to fill the container space
         self.set_hexpand(True)
@@ -919,11 +585,18 @@ class GLWidget(Gtk.GLArea):
         self.ctx.clear(0.15, 0.15, 0.18, 1.0)
 
         view = Matrix44.look_at(
-            eye=(0.0, 3.0, 5.0),
+            eye=(0.0, 1.2, self.zoom),
             target=(0.0, 0.0, 0.0),
             up=(0.0, 1.0, 0.0)
         )
-        model = Matrix44.from_eulers((0.0, self.rotation, 0.0))
+        #model = Matrix44.from_eulers((0.0, self.rotation, 0.0))
+
+        base_correction = Matrix44.from_x_rotation(-np.pi / 100)
+        spin = Matrix44.from_y_rotation(self.rotation)
+        translation = Matrix44.from_translation((0.0, self.pos_y, 0.0))
+        
+        model = translation * spin * base_correction
+
 
         self.program['m_view'].write(view.astype('f4').tobytes())
         self.program['m_model'].write(model.astype('f4').tobytes())
@@ -1032,17 +705,10 @@ class GTK4App(Gtk.Application):
         #
         tri_btn = Gtk.Button(label="Triangle")
         sidebar.append(tri_btn)
-        #tri_btn.connect("clicked", lambda button : self.on_model_select("triangle"))
         def cb_click(state):
             if state == "tri":
-             #v_bytes, i_bytes = load_mesh_data("tri_3d.obj")
              gl.set_shader(shader_program_tri())
-             #gl.set_vao('3f 3f', 'in_position', 'in_normal')
-             #gl.vbo.write(self.v_)
-             #gl.ibo.write(self.i_)
              gl.set_new_model_data(self.v_, self.i_ , '3f 3f', 'in_position', 'in_normal')
-             
-             #gl.queue_draw()
             elif state == "bus":
                 gl.set_shader(shader_program_bus())
                 gl.set_new_model_data(self.bus_v, self.bus_i , '3f 3f', 'in_position', 'in_normal')
@@ -1050,12 +716,10 @@ class GTK4App(Gtk.Application):
             elif state == "station":
                 gl.set_shader(shader_program_station())
                 gl.set_new_model_data(self.station_v, self.station_i , '3f 3f 2f', 'in_position', 'in_normal', 'in_texcoord', station_tex=self.station_tex)
-
-
             else:
                 print("error")
             
-            #gl.queue_draw()
+            
 
 
         
@@ -1072,16 +736,58 @@ class GTK4App(Gtk.Application):
 
         #
         main_box.append(sidebar)
+        #
+        # Zoom Control
+        zoom_label = Gtk.Label(label="Zoom Window:")
+        zoom_label.set_halign(Gtk.Align.START)
+        zoom_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 10.0, 0.1)
+        zoom_slider.set_value(gl.zoom)
+        zoom_footer = Gtk.Label(label=f"zoom: {gl.zoom:.1f}")
+        zoom_footer.set_halign(Gtk.Align.START)
+
+        def update_zoom(sl):
+            val = sl.get_value()
+            gl.zoom = val
+            zoom_footer.set_label(f"zoom: {val:.1f}")
+
+        zoom_slider.connect("value-changed", update_zoom)
+        sidebar.append(zoom_label)
+        sidebar.append(zoom_slider)
+        sidebar.append(zoom_footer)
+
+         # Speed Control
+        speed_slider_label = Gtk.Label(label="Rotation Speed:")
+        speed_slider_label.set_halign(Gtk.Align.START)
+        speed_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 10.0, 0.2)
+        speed_slider.set_value(gl.speed)
+        speed_footer = Gtk.Label(label=f"speed: {gl.speed:.1f}")
+        speed_footer.set_halign(Gtk.Align.START)
+        def on_speed(sl):
+            val = sl.get_value()
+            gl.speed = val
+            speed_footer.set_label(f"speed: {val:.1f}")
+
+        speed_slider.connect("value-changed", on_speed)
+        sidebar.append(speed_slider_label)
+        sidebar.append(speed_slider)
+        sidebar.append(speed_footer)
+
+        
+        # Height Control
+        height_label = Gtk.Label(label="Height (Y Position):")
+        height_label.set_halign(Gtk.Align.START)
+        height_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -2.0, 2.0, 0.1)
+        height_slider.set_value(gl.pos_y)
+        height_slider.connect("value-changed", lambda sl: setattr(gl, 'pos_y', sl.get_value()))
+        sidebar.append(height_label)
+        sidebar.append(height_slider)
 
         #
         win.set_child(main_box)
         win.present()
         
         # Start GLib frame ticks
-        #GLib.timeout_add(16, on_tick, self.gl_widget)
-        #GLib.timeout_add(16, on_tick, self.gl_tri)
-        #GLib.timeout_add(16, on_tick, self.gl_bus)
-        #GLib.timeout_add(16, on_tick, self.gl_station)
+        GLib.timeout_add(16, on_tick, gl)
 
 if __name__ == '__main__':
   app = GTK4App()

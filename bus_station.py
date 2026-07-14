@@ -188,10 +188,10 @@ class ModernGLWidget(Gtk.GLArea):
             
                 
             
-            v_bytes, i_bytes, bus_mesh = load_combined_mesh_data(self.bus_file, self.station_file, 
+            v_bytes, i_bytes, _ = load_combined_mesh_data(self.bus_file, self.station_file, 
                                                                      lambda x: self.update_bus_mesh_z_margin(x)
                                                                  )
-            #bus_mesh.vertices += [0.0, 0.0, 7.0]
+            
 
             
             self.vbo = self.ctx.buffer(v_bytes)
@@ -302,7 +302,6 @@ class GTK4App(Gtk.Application):
         zoom_label.set_halign(Gtk.Align.START)
         zoom_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 10.0, 0.1)
         zoom_slider.set_value(gl_widget.zoom)
-        
         zoom_footer = Gtk.Label(label=f"zoom: {gl_widget.zoom:.1f}")
         zoom_footer.set_halign(Gtk.Align.START)
 
