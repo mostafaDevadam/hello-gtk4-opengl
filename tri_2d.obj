@@ -1,0 +1,19 @@
+# Wavefront OBJ example
+o SingleTriangle
+
+# 1. Vertices (X Y Z)
+v -1.0 0.0 0.0
+v 1.0 0.0 0.0
+v -0.0 1.0 0.0
+
+
+# 2. Texture Coordinates (U V)
+vt 0.0 0.0
+vt 1.0 0.0
+vt 0.5 1.0
+
+# 3. Normals (NX NY NZ)
+vn 0.0 0.0 1.0
+
+# 4. Faces (Vertex_Index / Texture_Index / Normal_Index)
+f 1/1/1 2/2/1 3/3/1
