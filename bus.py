@@ -171,7 +171,7 @@ class ModernGLWidget(Gtk.GLArea):
         )
         
         # 1. Base rotation to flip Z-up to Y-up (-90 degrees in radians)
-        base_correction = Matrix44.from_x_rotation(-np.pi / 2)
+        base_correction = Matrix44.from_x_rotation(-np.pi / 100)
         # 2. Continuous rotation around the Y-axis (Up axis)
         spin = Matrix44.from_y_rotation(self.rotation)
         # 3. Create a translation matrix using our self.pos_y value
