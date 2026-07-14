@@ -78,7 +78,7 @@ class ModernGLWidget(Gtk.GLArea):
         self.ctx = moderngl.get_context()
         self.ctx.enable(self.ctx.DEPTH_TEST)
 
-        # ES 3.0 Shaders (Precision highp is mandatory) 
+        # ES 3.0 Shaders (Precision highp is mandatory)
         vertex_shader = """
         #version 300 es
         precision highp float;
@@ -171,7 +171,7 @@ class ModernGLWidget(Gtk.GLArea):
         )
         
         # 1. Base rotation to flip Z-up to Y-up (-90 degrees in radians)
-        base_correction = Matrix44.from_x_rotation(-np.pi / 100)
+        base_correction = Matrix44.from_x_rotation(-np.pi / 2)
         # 2. Continuous rotation around the Y-axis (Up axis)
         spin = Matrix44.from_y_rotation(self.rotation)
         # 3. Create a translation matrix using our self.pos_y value
