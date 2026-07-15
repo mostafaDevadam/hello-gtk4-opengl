@@ -222,6 +222,50 @@ def shader_program_station():
 
     return vertex_shader, fragment_shader
 
+def shader_program_combined():
+        vertex_shader = """
+        #version 300 es
+        precision highp float;
+
+        in vec3 in_position;
+        in vec3 in_normal;
+        in vec4 in_color;
+
+        uniform mat4 m_proj;
+        uniform mat4 m_view;
+        uniform mat4 m_model;
+
+        out vec3 v_normal;
+        out vec4 v_color;
+
+        void main() {
+            v_normal = mat3(m_model) * in_normal;
+            v_color = in_color;
+            gl_Position = m_proj * m_view * m_model * vec4(in_position, 1.0);
+        }
+        """
+
+        fragment_shader = """
+        #version 300 es
+        precision highp float;
+
+        in vec3 v_normal;
+        in vec4 v_color;
+
+        out vec4 fragColor;
+
+        void main() {
+            vec3 light_dir = normalize(vec3(1.5, 3.5, 2.5));
+            float diff = max(dot(normalize(v_normal), light_dir), 0.3);
+            
+            vec3 diffuse = v_color.rgb * diff;
+            vec3 ambient = v_color.rgb * 0.22;
+            
+            fragColor = vec4(diffuse + ambient, v_color.a);
+        }
+        """
+
+        return vertex_shader, fragment_shader
 
 def on_tick(canvas):
     # Diese Schleife signalisiert GTK im Hintergrund, den Canvas permanent neu zu zeichnen
@@ -231,7 +275,7 @@ def on_tick(canvas):
 
 
 
-def load_mesh_data(filepath):
+def load_tri_mesh_data(filepath):
     """Loads mesh data using trimesh into bytes for ModernGL."""
     mesh = trimesh.load(filepath, force='mesh')
     
@@ -315,6 +359,47 @@ def load_station_mesh_data(filepath):
     return vertex_data.tobytes(), indices.tobytes(), texture_image
 
 
+def load_combined_mesh_data(bus_path, station_path, cb=None):
+    bus_mesh = trimesh.load(bus_path, force='mesh')
+    station_mesh = trimesh.load(station_path, force='mesh')
+    
+    # Offset the bus slightly so it parks alongside the station
+    #bus_mesh.vertices += [0.0, 0.0, 0.7]  
+    # 1. Scale the bus up (adjust 1.8 to make it even larger/smaller if needed)
+    bus_mesh.apply_scale(1.8)
+
+    
+
+    if cb is not None:
+        cb(bus_mesh) # This will now safely shift the bus on its Z axis!
+    else:
+        bus_mesh.vertices += [0.0, 0.0, 7.0]
+
+    # Merge geometries together
+    scene = trimesh.Scene([bus_mesh, station_mesh])
+    combined_mesh = scene.to_mesh()
+
+    # Global scale normalization
+    combined_mesh.vertices -= combined_mesh.center_mass
+    max_bound = np.max(np.abs(combined_mesh.vertices))
+    if max_bound > 0:
+        combined_mesh.vertices /= max_bound
+        combined_mesh.vertices *= 1.4
+
+    if not hasattr(combined_mesh, 'vertex_normals') or len(combined_mesh.vertex_normals) == 0:
+        combined_mesh.generate_normals()
+
+    color_visuals = combined_mesh.visual.to_color()
+    colors = color_visuals.vertex_colors.astype('f4') / 255.0
+
+    vertices = combined_mesh.vertices.astype('f4')
+    normals = combined_mesh.vertex_normals.astype('f4')
+    
+    vertex_data = np.hstack([vertices, normals, colors])
+    indices = combined_mesh.faces.astype('i4')
+
+    return vertex_data.tobytes(), indices.tobytes()
+
 
 #
 
@@ -335,6 +420,8 @@ class GLWidget(Gtk.GLArea):
         self.speed = 2.0  # Configurable rotational speed constant
         self.pos_y = 0.0  
         self.zoom = 4.5  
+
+        self.bus_z_margin = 7.0
 
         # Set widget layout properties to fill the container space
         self.set_hexpand(True)
@@ -412,7 +499,7 @@ class GLWidget(Gtk.GLArea):
 
         # Load obj buffers
         try:
-            v_bytes, i_bytes = load_mesh_data("tri_3d.obj")
+            v_bytes, i_bytes = load_tri_mesh_data("tri_3d.obj")
             initial_v = np.array([
                 [-0.5, -0.5, 0.0,  0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0],
                 [ 0.5, -0.5, 0.0,  0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0],
@@ -612,6 +699,9 @@ class GLWidget(Gtk.GLArea):
         #self.vao.render(moderngl.TRIANGLES)
         return True
 
+    def update_bus_mesh_z_margin(self, x):
+                x.vertices += [0.0, 0.0, self.bus_z_margin]
+
     def on_tick(self):
         self.rotation += 0.02
         self.queue_draw()
@@ -636,33 +726,171 @@ class GTK4App(Gtk.Application):
         self.gl_station = None
 
         self.triangle_file = "tri_3d.obj"
+        self.bus_file = "bus.obj"
+        self.station_file = "stationBus.obj"
 
-         
-        v_, i_ = load_mesh_data("tri_3d.obj")
-        self.v_ = v_
-        self.i_ = i_
+        self.tri_mesh = self.get_mesh(self.triangle_file) 
+        self.tri_mesh_vi = self.get_mesh_data(self.tri_mesh)
 
-        bus_v, bus_i = load_bus_mesh_data("bus.obj")
-        self.bus_v = bus_v
-        self.bus_i = bus_i
+        self.bus_mesh = self.get_mesh("bus.obj") 
+        self.bus_mesh_vi = self.get_bus_mesh_data(self.bus_mesh)
 
-        station_v, station_i, station_tex = load_station_mesh_data("stationBus.obj")
-        self.station_v = station_v
-        self.station_i = station_i
-        self.station_tex = station_tex
+        self.station_mesh = self.get_mesh("stationBus.obj") 
+        self.station_mesh_vi = self.get_station_mesh_data(self.station_mesh)
+
+
+        #v_, i_ = load_combined_mesh_data("bus.obj", "stationBus.obj", None)
+        #self.v_ = v_
+        #self.i_ = i_ 
+        self.combined_mesh_vi = self.get_combined_mesh_data(self.get_mesh("bus.obj"), self.get_mesh("stationBus.obj"), None)
+        
+
+        
 
         
             
-        # Flip PIL image vertically to match OpenGL texture coordinate logic
-        self.tex_img = station_tex.transpose(Image.FLIP_TOP_BOTTOM)
-        # Convert image to raw bytes
-        self.img_data = station_tex.convert('RGBA').tobytes()
-        # 1. Create and write Texture object on GPU
-        #self.texture = self.ctx.texture(station_tex.size, 4, data=self.img_data)
-        #self.texture.build_mipmaps()
+        
 
 
     
+    def get_mesh(self, file_name):
+        if not file_name:
+            print("file_name is required!")
+            return
+        
+        mesh = trimesh.load(file_name, force='mesh')
+        return mesh
+        
+
+    def get_mesh_data(self, mesh):
+        if not mesh:
+            print("mesh is required!")
+            return
+        
+        mesh.vertices -= mesh.center_mass
+        
+        if not hasattr(mesh, 'vertex_normals'):
+               mesh.generate_normals()
+
+        vertices = mesh.vertices.astype('f4')
+        normals = mesh.vertex_normals.astype('f4')
+        
+        vertex_data = np.hstack([vertices, normals])
+        indices = mesh.faces.astype('i4')
+
+        #self.tri_mesh_vi = vertex_data.tobytes(), indices.tobytes()
+
+        return vertex_data.tobytes(), indices.tobytes()
+    
+    def get_bus_mesh_data(self, mesh):
+            if not mesh:
+                print("mesh is required!")
+                return
+        # --- AUTO-CENTERING ---
+            # Shift the geometry so its center of mass sits exactly at (0, 0, 0)
+            mesh.vertices -= mesh.center_mass
+
+            # --- AUTO-SCALING ---
+            # Scale the model so its largest dimension is exactly 2.0 units wide/tall.
+            # This prevents the camera from clipping inside the model.
+            max_bound = np.max(np.abs(mesh.vertices))
+            if max_bound > 0:
+                mesh.vertices /= max_bound
+                mesh.vertices *= 1.2  # Fine-tuned size factor for a comfortable perspective view
+
+            # Ensure normal vectors exist for 3D depth shading
+            if not hasattr(mesh, 'vertex_normals') or len(mesh.vertex_normals) == 0:
+                mesh.generate_normals()
+
+            vertices = mesh.vertices.astype('f4')
+            normals = mesh.vertex_normals.astype('f4')
+            
+            # Pack positions (x,y,z) and normals (nx,ny,nz) side-by-side
+            vertex_data = np.hstack([vertices, normals])
+            indices = mesh.faces.astype('i4')
+
+            return vertex_data.tobytes(), indices.tobytes()
+    
+    def get_station_mesh_data(self, mesh):
+            if not mesh:
+                print("mesh is required!")
+                return
+    
+            mesh.vertices -= mesh.center_mass
+            max_bound = np.max(np.abs(mesh.vertices))
+            if max_bound > 0:
+                mesh.vertices /= max_bound
+                mesh.vertices *= 1.2
+
+            if not hasattr(mesh, 'vertex_normals') or len(mesh.vertex_normals) == 0:
+                mesh.generate_normals()
+
+            if hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None:
+                uvs = mesh.visual.uv.astype('f4')
+            else:
+                uvs = np.zeros((len(mesh.vertices), 2), dtype='f4')
+
+            vertices = mesh.vertices.astype('f4')
+            normals = mesh.vertex_normals.astype('f4')
+            
+            vertex_data = np.hstack([vertices, normals, uvs])
+            indices = mesh.faces.astype('i4')
+
+            #texture_image = self.get_station_texture(mesh)
+
+            return vertex_data.tobytes(), indices.tobytes(), self.get_station_texture(mesh)
+    
+    def get_station_texture(self, mesh):
+                texture_image = None
+                if hasattr(mesh.visual, 'material') and hasattr(mesh.visual.material, 'image'):
+                    texture_image = mesh.visual.material.image
+                
+                if texture_image is None:
+                    texture_image = Image.new('RGB', (2, 2), (255, 255, 255))
+                
+                return texture_image
+            
+    def get_combined_mesh_data(self, bus_mesh, station_mesh, cb=None):
+        if not bus_mesh or not station_mesh:
+            print("bus_mesh and station_mesh are required!")
+            return 
+       
+        bus_mesh.apply_scale(1.8)
+
+        #bus_mesh.vertices += [0.0, 0.0, 7.0]
+
+        if cb is not None:
+            cb(bus_mesh) # This will now safely shift the bus on its Z axis!
+        else:
+            bus_mesh.vertices += [0.0, 0.0, 2.0]
+
+        # Merge geometries together
+        scene = trimesh.Scene([bus_mesh, station_mesh])
+        combined_mesh = scene.to_mesh()
+
+        # Global scale normalization
+        combined_mesh.vertices -= combined_mesh.center_mass
+        max_bound = np.max(np.abs(combined_mesh.vertices))
+        if max_bound > 0:
+            combined_mesh.vertices /= max_bound
+            combined_mesh.vertices *= 1.4
+
+        if not hasattr(combined_mesh, 'vertex_normals') or len(combined_mesh.vertex_normals) == 0:
+            combined_mesh.generate_normals()
+
+        color_visuals = combined_mesh.visual.to_color()
+        colors = color_visuals.vertex_colors.astype('f4') / 255.0
+
+        vertices = combined_mesh.vertices.astype('f4')
+        normals = combined_mesh.vertex_normals.astype('f4')
+        
+        vertex_data = np.hstack([vertices, normals, colors])
+        indices = combined_mesh.faces.astype('i4')
+
+        return vertex_data.tobytes(), indices.tobytes()
+
+
+        
                 
 
     def do_activate(self):
@@ -705,17 +933,25 @@ class GTK4App(Gtk.Application):
         #
         tri_btn = Gtk.Button(label="Triangle")
         sidebar.append(tri_btn)
-        def cb_click(state):
+        def cb_click(state = "combined"):
             if state == "tri":
+             v_, i_ = self.tri_mesh_vi
              gl.set_shader(shader_program_tri())
-             gl.set_new_model_data(self.v_, self.i_ , '3f 3f', 'in_position', 'in_normal')
+             gl.set_new_model_data(v_, i_ , '3f 3f', 'in_position', 'in_normal')
             elif state == "bus":
+                bus_v, bus_i = self.bus_mesh_vi
                 gl.set_shader(shader_program_bus())
-                gl.set_new_model_data(self.bus_v, self.bus_i , '3f 3f', 'in_position', 'in_normal')
+                gl.set_new_model_data(bus_v, bus_i , '3f 3f', 'in_position', 'in_normal')
 
             elif state == "station":
+                station_v, station_i, station_tex = self.station_mesh_vi
                 gl.set_shader(shader_program_station())
-                gl.set_new_model_data(self.station_v, self.station_i , '3f 3f 2f', 'in_position', 'in_normal', 'in_texcoord', station_tex=self.station_tex)
+                gl.set_new_model_data(station_v, station_i , '3f 3f 2f', 'in_position', 'in_normal', 'in_texcoord', station_tex=station_tex)
+            elif state == "combined":
+                v_, i_ = self.combined_mesh_vi
+                gl.set_shader(shader_program_combined())
+                gl.set_new_model_data(v_, i_, '3f 3f 4f', 'in_position', 'in_normal', 'in_color')
+            
             else:
                 print("error")
             
@@ -732,6 +968,10 @@ class GTK4App(Gtk.Application):
         station_btn = Gtk.Button(label="Station") 
         sidebar.append(station_btn)
         station_btn.connect("clicked", lambda button : cb_click("station"))
+
+        combined_btn = Gtk.Button(label="Combined") 
+        sidebar.append(combined_btn)
+        combined_btn.connect("clicked", lambda button : cb_click("combined"))
         
 
         #
@@ -781,6 +1021,54 @@ class GTK4App(Gtk.Application):
         height_slider.connect("value-changed", lambda sl: setattr(gl, 'pos_y', sl.get_value()))
         sidebar.append(height_label)
         sidebar.append(height_slider)
+
+        #
+        # bus margin z
+        bus_margin_z_label = Gtk.Label(label="Bus Z Margin Window:")
+        bus_margin_z_label.set_halign(Gtk.Align.START)
+        bus_margin_z_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1.5, 10.0, 0.1)
+        bus_margin_z_slider.set_value(gl.bus_z_margin)
+        
+        bus_margin_z_footer = Gtk.Label(label=f"Bus Z Margin: {gl.bus_z_margin:.1f}")
+        bus_margin_z_footer.set_halign(Gtk.Align.START)
+
+        def update_bus_z_margin(sl):
+            if not sl:
+                print("not changed")
+                return
+            
+            val = sl.get_value()
+            gl.bus_z_margin = val
+            bus_margin_z_footer.set_label(f"Bus Z Margin: {val:.1f}")
+           
+            
+            # Re-run the mesh pipeline using the vertex callback
+            """v_bytes, i_bytes = load_combined_mesh_data(
+                self.bus_file, 
+                self.station_file, 
+                lambda x: gl.update_bus_mesh_z_margin(x)
+            )"""
+
+
+            v_bytes, i_bytes = self.get_combined_mesh_data(self.get_mesh("bus.obj"), self.get_mesh("stationBus.obj"), 
+                                        lambda x: gl.update_bus_mesh_z_margin(x))
+
+            gl.set_new_model_data(v_bytes, i_bytes, '3f 3f 4f', 'in_position', 'in_normal', 'in_color')
+
+
+            # 2. ModernGL built-in data overwrite (orphan=True clears the old memory slot safely)
+            gl.vbo.write(v_bytes)
+            gl.ibo.write(i_bytes)
+            
+            # Push the updated buffers back into your ModernGL widget context
+            #gl_widget.update_mesh_buffers(v_bytes, i_bytes) # Or however your widget uploads bytes to GPU
+            #gl.queue_draw()
+
+
+        bus_margin_z_slider.connect("value-changed", update_bus_z_margin)
+        sidebar.append(bus_margin_z_label)
+        sidebar.append(bus_margin_z_slider)
+        sidebar.append(bus_margin_z_footer)
 
         #
         win.set_child(main_box)
