@@ -732,17 +732,17 @@ class GTK4App(Gtk.Application):
         self.tri_mesh = self.get_mesh(self.triangle_file) 
         self.tri_mesh_vi = self.get_mesh_data(self.tri_mesh)
 
-        self.bus_mesh = self.get_mesh("bus.obj") 
+        self.bus_mesh = self.get_mesh(self.bus_file) 
         self.bus_mesh_vi = self.get_bus_mesh_data(self.bus_mesh)
 
-        self.station_mesh = self.get_mesh("stationBus.obj") 
+        self.station_mesh = self.get_mesh(self.station_file) 
         self.station_mesh_vi = self.get_station_mesh_data(self.station_mesh)
 
 
         #v_, i_ = load_combined_mesh_data("bus.obj", "stationBus.obj", None)
         #self.v_ = v_
         #self.i_ = i_ 
-        self.combined_mesh_vi = self.get_combined_mesh_data(self.get_mesh("bus.obj"), self.get_mesh("stationBus.obj"), None)
+        self.combined_mesh_vi = self.get_combined_mesh_data(self.get_mesh(self.bus_file), self.get_mesh(self.station_file), None)
         
 
         
@@ -1050,7 +1050,7 @@ class GTK4App(Gtk.Application):
             )"""
 
 
-            v_bytes, i_bytes = self.get_combined_mesh_data(self.get_mesh("bus.obj"), self.get_mesh("stationBus.obj"), 
+            v_bytes, i_bytes = self.get_combined_mesh_data(self.get_mesh(self.bus_file), self.get_mesh(self.station_file), 
                                         lambda x: gl.update_bus_mesh_z_margin(x))
 
             gl.set_new_model_data(v_bytes, i_bytes, '3f 3f 4f', 'in_position', 'in_normal', 'in_color')
